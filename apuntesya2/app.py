@@ -32,6 +32,43 @@ load_dotenv()
 app = Flask(__name__, instance_relative_config=True)
 
 
+# --- PROMOTE ADMIN (habilitado solo con ENVs) ---
+import os
+from flask import request, abort
+from sqlalchemy import select
+
+@app.route("/_promote_admin_once", methods=["GET"])
+def _promote_admin_once():
+    # Para que no exista si no lo habilitás por ENV
+    if os.getenv("PROMOTE_ADMIN_ENABLED", "0") != "1":
+        abort(404)
+
+    secret_env = os.getenv("PROMOTE_ADMIN_SECRET", "")
+    secret_arg = request.args.get("secret", "")
+    email = request.args.get("email", "").strip().lower()
+
+    if not secret_env or secret_arg != secret_env:
+        abort(403)
+
+    if not email:
+        return "Falta ?email=", 400
+
+    # Ajustá el import si tus modelos están en otro módulo
+    from apuntesya2.models import User
+    from apuntesya2.app import db  # si ya tenés 'db' en app.py
+
+    user = db.session.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    if not user:
+        return "Usuario no encontrado", 404
+
+    # Marcar admin: adaptá el nombre del campo si es distinto
+    user.is_admin = True
+    db.session.commit()
+
+    # Deshabilitá la promo para que sea one-shot (opcional)
+    # os.environ["PROMOTE_ADMIN_ENABLED"] = "0"  # no persiste en Render, por eso ver paso 3
+
+    return f"OK. {email} ahora es admin."
 
 
 import os
