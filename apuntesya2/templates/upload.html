@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Subir apunte (PDF)</h2>
+  <form method="post" enctype="multipart/form-data">
+    <label>Título</label><input class="input" name="title" required>
+    <label>Descripción</label><input class="input" name="description" required>
+    <div class="grid">
+      <div><label>Universidad</label><input class="input" name="university" value="{{ current_user.university }}"
+          required></div>
+      <div><label>Facultad</label><input class="input" name="faculty" value="{{ current_user.faculty }}" required></div>
+      <div><label>Carrera</label><input class="input" name="career" value="{{ current_user.career }}" required></div>
+    </div>
+    <label>Precio (ARS). Dejar en blanco para gratis</label><input class="input" name="price" type="number" min="0"
+      step="0.01">
+
+    <label>Archivo PDF</label><input class="input" type="file" name="file" accept="application/pdf" required>
+    <button class="btn">Subir</button>
+  </form>
+
+</div>
+{% endblock %}

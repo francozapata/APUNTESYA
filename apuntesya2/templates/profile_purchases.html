@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Mis compras</h2>
+  <div class="grid">
+    {% for it in items %}
+    <div class="note">
+      <div class="title">{{ it.title }}</div>
+      <div>Pagado: ${{ '%.2f' % (it.price_cents/100) }}</div>
+      <div class="muted">Fecha: {{ it.created_at }}</div>
+      <a class="btn" href="{{ url_for('note_detail', note_id=it.note_id) }}">Ver</a>
+      <a class="btn secondary" href="{{ url_for('download_note', note_id=it.note_id) }}">Descargar</a>
+    </div>
+    {% else %}
+    <div>No realizaste compras todavía.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
