@@ -1,7 +1,4 @@
-﻿try:
-    from apuntesya2.app import app
-except Exception:
-    try:
-        from app import app
-    except Exception:
-        from run import app
+﻿from apuntesya2.app import app
+
+if __name__ == "__main__":
+    app.run()
