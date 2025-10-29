@@ -47,8 +47,17 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-me')
 app.config['ENV'] = os.getenv('FLASK_ENV', 'production')
 
 # Archivos / persistencia
-app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', '/data/uploads')
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# Carpeta de uploads con fallback seguro para Render
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(PROJECT_ROOT, "data"))
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(DATA_DIR, "uploads"))
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_DIR
+
 
 # DB: usa DATABASE_URL si existe; si no, SQLite en /data
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:////data/apuntesya.db')
