@@ -67,6 +67,7 @@ def _promote_admin_once():
 
     # Deshabilitá la promo para que sea one-shot (opcional)
     # os.environ["PROMOTE_ADMIN_ENABLED"] = "0"  # no persiste en Render, por eso ver paso 3
+    app.logger.warning("Ruta /_promote_admin_once habilitada")
 
     return f"OK. {email} ahora es admin."
 
