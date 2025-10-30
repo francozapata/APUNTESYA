@@ -41,9 +41,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, select
 
+from sqlalchemy import select
+
 @app.route("/_promote_admin_once", methods=["GET"])
 def _promote_admin_once():
-    # Habilitar solo si el ENV lo permite
     if os.getenv("PROMOTE_ADMIN_ENABLED", "0") != "1":
         abort(404)
 
@@ -56,25 +57,22 @@ def _promote_admin_once():
     if not email:
         return "Falta ?email=", 400
 
-    # Import tardío para evitar ciclos
     from apuntesya2.models import User
-
-    # Usar la misma URL de DB que usa tu app (Postgres en Render o SQLite local)
-    db_url = os.getenv("DATABASE_URL") or f"sqlite:///{os.path.join(DATA_DIR,'apuntesya.db')}"
-    engine = create_engine(db_url, future=True)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    # 👇 Reutilizar la session de la app (AJUSTA el nombre si en tu app es otro)
+    from apuntesya2.app import SessionLocal  # si la ruta está en el MISMO app.py, podés usar directamente SessionLocal
 
     with SessionLocal() as session:
         user = session.execute(select(User).where(User.email == email)).scalar_one_or_none()
         if not user:
             return "Usuario no encontrado", 404
 
-        # ajusta el nombre del campo si en tu modelo es distinto
+        # ajustá el nombre del campo si difiere
         user.is_admin = True
         session.commit()
 
     app.logger.warning("Promovido a admin: %s", email)
     return f"OK. {email} ahora es admin."
+
 
 
 
