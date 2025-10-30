@@ -43,6 +43,8 @@ from sqlalchemy import create_engine, select
 
 from sqlalchemy import select
 
+from sqlalchemy import select
+
 @app.route("/_promote_admin_once", methods=["GET"])
 def _promote_admin_once():
     if os.getenv("PROMOTE_ADMIN_ENABLED", "0") != "1":
@@ -58,9 +60,8 @@ def _promote_admin_once():
         return "Falta ?email=", 400
 
     from apuntesya2.models import User
-    # 👇 Reutilizar la session de la app (AJUSTA el nombre si en tu app es otro)
-    from apuntesya2.app import SessionLocal  # si la ruta está en el MISMO app.py, podés usar directamente SessionLocal
 
+    # 👇 Usamos la Session global ya creada (NO importes desde apuntesya2.app si estás en el mismo archivo)
     with SessionLocal() as session:
         user = session.execute(select(User).where(User.email == email)).scalar_one_or_none()
         if not user:
@@ -72,8 +73,6 @@ def _promote_admin_once():
 
     app.logger.warning("Promovido a admin: %s", email)
     return f"OK. {email} ahora es admin."
-
-
 
 
 
@@ -176,6 +175,24 @@ app.config["MP_ACCESS_TOKEN_PLATFORM"] = os.getenv("MP_ACCESS_TOKEN")  # token d
 app.config["MP_OAUTH_REDIRECT_URL"] = os.getenv("MP_OAUTH_REDIRECT_URL")
 
 engine = create_engine(app.config["SQLALCHEMY_DATABASE_URI"].replace("sqlite:///", "sqlite:///"), future=True)
+# ---- Base de datos (ajusta si ya lo tenés) ----
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, scoped_session
+
+# Ruta DB segura para Render (si usás SQLite)
+DB_PATH = os.getenv("DB_PATH", os.path.join(DATA_DIR, "apuntesya.db"))
+DB_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
+
+engine_kwargs = {}
+if DB_URL.startswith("sqlite"):
+    # Recomendado para SQLite en Flask
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DB_URL, pool_pre_ping=True, future=True, **engine_kwargs)
+
+# 👉 ESTA es la sesión global que vamos a reusar
+# -----------------------------------------------
+
 Base.metadata.create_all(engine)
 Session = scoped_session(sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
 
