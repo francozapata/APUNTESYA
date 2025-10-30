@@ -16,7 +16,7 @@ from werkzeug.utils import secure_filename
 from sqlalchemy import create_engine, select, or_, and_, func
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-# === MODELOS (importar ANTES de usar Base) ===
+# === IMPORTÁ MODELOS ANTES DE USAR Base ===
 from apuntesya2.models import (
     Base, User, Note, Purchase,
     University, Faculty, Career
@@ -25,30 +25,17 @@ from apuntesya2 import mp
 
 load_dotenv()
 
-# --- Commission & IIBB defaults ---
-MP_COMMISSION_RATE_DEFAULT = 0.05
-APY_COMMISSION_RATE_DEFAULT = 0.0
-IIBB_ENABLED_DEFAULT = False
-IIBB_RATE_DEFAULT = 0.0
-
-MP_COMMISSION_RATE = MP_COMMISSION_RATE_DEFAULT
-APY_COMMISSION_RATE = APY_COMMISSION_RATE_DEFAULT
-IIBB_ENABLED = IIBB_ENABLED_DEFAULT
-IIBB_RATE = IIBB_RATE_DEFAULT
-# ----------------------------------
-
 app = Flask(__name__, instance_relative_config=True)
 
-# ----------------- Health -----------------
+# Healthcheck
 @app.get("/health")
 def health():
     return {"ok": True}, 200
 
-# ----------------- Paths (Render-safe) -----------------
+# -------- Paths (Render-safe) --------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
-# Render: usar /tmp (writable). Local: ./data
 if os.environ.get("RENDER", "0") == "1":
     DATA_DIR = "/tmp/data"
 else:
@@ -57,14 +44,12 @@ else:
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(DATA_DIR, "uploads"))
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 app.config['UPLOAD_FOLDER'] = UPLOAD_DIR
 
-# ----------------- Config -----------------
+# -------- Config básica / MP / comisiones --------
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(16))
 app.config['ENV'] = os.getenv('FLASK_ENV', 'production')
 
-# Mercado Pago & comisiones
 app.config['MP_PUBLIC_KEY'] = os.getenv('MP_PUBLIC_KEY', '')
 app.config['MP_ACCESS_TOKEN'] = os.getenv('MP_ACCESS_TOKEN', '')
 app.config['MP_WEBHOOK_SECRET'] = os.getenv('MP_WEBHOOK_SECRET', '')
@@ -76,28 +61,15 @@ app.config['MP_OAUTH_REDIRECT_URL'] = os.getenv("MP_OAUTH_REDIRECT_URL")
 
 app.config['MP_COMMISSION_RATE']  = float(os.getenv('MP_COMMISSION_RATE', '0.0774'))
 app.config['APY_COMMISSION_RATE'] = float(os.getenv('APY_COMMISSION_RATE', '0.05'))
-app.config['IIBB_ENABLED']        = os.getenv('IIBB_ENABLED', str(IIBB_ENABLED_DEFAULT)).lower() in ('1','true','yes')
-app.config['IIBB_RATE']           = float(os.getenv('IIBB_RATE', str(IIBB_RATE_DEFAULT)))
+app.config['IIBB_ENABLED']        = os.getenv('IIBB_ENABLED', 'false').lower() in ('1','true','yes')
+app.config['IIBB_RATE']           = float(os.getenv('IIBB_RATE', '0.0'))
 
-# Reflejar en variables globales usadas en cálculos
 MP_COMMISSION_RATE = float(app.config['MP_COMMISSION_RATE'])
 APY_COMMISSION_RATE = float(app.config['APY_COMMISSION_RATE'])
 IIBB_ENABLED = bool(app.config['IIBB_ENABLED'])
 IIBB_RATE = float(app.config['IIBB_RATE'])
 
-# Password reset (si lo usás)
-app.config.setdefault('SECURITY_PASSWORD_SALT', os.environ.get('SECURITY_PASSWORD_SALT', 'pw-reset'))
-app.config.setdefault('PASSWORD_RESET_EXPIRATION', int(os.environ.get('PASSWORD_RESET_EXPIRATION', '3600')))
-app.config.setdefault('ENABLE_SMTP', os.environ.get('ENABLE_SMTP', 'false'))
-app.config.setdefault('MAIL_SERVER', os.environ.get('MAIL_SERVER', 'smtp.gmail.com'))
-app.config.setdefault('MAIL_PORT', int(os.environ.get('MAIL_PORT', '587')))
-app.config.setdefault('MAIL_USERNAME', os.environ.get('MAIL_USERNAME'))
-app.config.setdefault('MAIL_PASSWORD', os.environ.get('MAIL_PASSWORD'))
-app.config.setdefault('MAIL_USE_TLS', True)
-app.config.setdefault('MAIL_DEFAULT_SENDER', os.environ.get('MAIL_DEFAULT_SENDER', 'no-reply@localhost'))
-
-# ----------------- Base de datos -----------------
-# Forzamos SQLite en un path seguro
+# -------- Base de datos (importar Base YA HECHO arriba) --------
 DB_PATH = os.path.join(DATA_DIR, "apuntesya.db")
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
@@ -106,6 +78,12 @@ if DATABASE_URL.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True, **engine_kwargs)
+
+# ✅ AHORA sí podemos crear tablas, porque Base YA existe
+Base.metadata.create_all(engine)
+
+# Sesión global
+Session = scoped_session(sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
 
 # Crear tablas al importar (wsgi importa app)
 Base.metadata.create_all(engine)
