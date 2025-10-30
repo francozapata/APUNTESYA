@@ -4,8 +4,8 @@ from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 from flask import (
-    Flask, render_template, request, redirect, url_for,
-    flash, send_from_directory, abort, jsonify
+    Flask, render_template, request, redirect, url_for, flash,
+    send_from_directory, abort, jsonify
 )
 from flask_login import (
     LoginManager, login_user, logout_user, current_user, login_required
@@ -16,66 +16,104 @@ from werkzeug.utils import secure_filename
 from sqlalchemy import create_engine, select, or_, and_, func
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Carga de envs
-# ──────────────────────────────────────────────────────────────────────────────
+# === MODELOS (importar ANTES de usar Base) ===
+from apuntesya2.models import (
+    Base, User, Note, Purchase,
+    University, Faculty, Career
+)
+from apuntesya2 import mp
+
 load_dotenv()
 
-# ──────────────────────────────────────────────────────────────────────────────
-# App (una sola instancia)
-# ──────────────────────────────────────────────────────────────────────────────
-app = Flask(__name__, instance_relative_config=True)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", secrets.token_hex(16))
-app.config["ENV"] = os.getenv("FLASK_ENV", "production")
+# --- Commission & IIBB defaults ---
+MP_COMMISSION_RATE_DEFAULT = 0.05
+APY_COMMISSION_RATE_DEFAULT = 0.0
+IIBB_ENABLED_DEFAULT = False
+IIBB_RATE_DEFAULT = 0.0
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Rutas de archivos persistentes (Render: usar /data)
-# ──────────────────────────────────────────────────────────────────────────────
+MP_COMMISSION_RATE = MP_COMMISSION_RATE_DEFAULT
+APY_COMMISSION_RATE = APY_COMMISSION_RATE_DEFAULT
+IIBB_ENABLED = IIBB_ENABLED_DEFAULT
+IIBB_RATE = IIBB_RATE_DEFAULT
+# ----------------------------------
+
+app = Flask(__name__, instance_relative_config=True)
+
+# ----------------- Health -----------------
+@app.get("/health")
+def health():
+    return {"ok": True}, 200
+
+# ----------------- Paths (Render-safe) -----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
-# Si estás en Render, usá /tmp (es la única carpeta con permisos de escritura)
+# Render: usar /tmp (writable). Local: ./data
 if os.environ.get("RENDER", "0") == "1":
     DATA_DIR = "/tmp/data"
 else:
     DATA_DIR = os.environ.get("DATA_DIR", os.path.join(PROJECT_ROOT, "data"))
 
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(DATA_DIR, "uploads"))
-
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+app.config['UPLOAD_FOLDER'] = UPLOAD_DIR
 
-app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
-app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB
+# ----------------- Config -----------------
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(16))
+app.config['ENV'] = os.getenv('FLASK_ENV', 'production')
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Base de datos
-#   - Si DATABASE_URL no está, usamos sqlite:///data/apuntesya.db
-#   - Para SQLite habilitamos check_same_thread=False
-# ──────────────────────────────────────────────────────────────────────────────
-DATABASE_URL = f"sqlite:///{os.path.join(DATA_DIR, 'apuntesya.db')}"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-Base.metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
+# Mercado Pago & comisiones
+app.config['MP_PUBLIC_KEY'] = os.getenv('MP_PUBLIC_KEY', '')
+app.config['MP_ACCESS_TOKEN'] = os.getenv('MP_ACCESS_TOKEN', '')
+app.config['MP_WEBHOOK_SECRET'] = os.getenv('MP_WEBHOOK_SECRET', '')
+app.config['BASE_URL'] = os.getenv('BASE_URL', '')
 
-engine_kwargs = {"pool_pre_ping": True, "future": True}
-if DB_URL.startswith("sqlite"):
+app.config['PLATFORM_FEE_PERCENT'] = float(os.getenv("MP_PLATFORM_FEE_PERCENT", "5.0"))
+app.config['MP_ACCESS_TOKEN_PLATFORM'] = os.getenv("MP_ACCESS_TOKEN")
+app.config['MP_OAUTH_REDIRECT_URL'] = os.getenv("MP_OAUTH_REDIRECT_URL")
+
+app.config['MP_COMMISSION_RATE']  = float(os.getenv('MP_COMMISSION_RATE', '0.0774'))
+app.config['APY_COMMISSION_RATE'] = float(os.getenv('APY_COMMISSION_RATE', '0.05'))
+app.config['IIBB_ENABLED']        = os.getenv('IIBB_ENABLED', str(IIBB_ENABLED_DEFAULT)).lower() in ('1','true','yes')
+app.config['IIBB_RATE']           = float(os.getenv('IIBB_RATE', str(IIBB_RATE_DEFAULT)))
+
+# Reflejar en variables globales usadas en cálculos
+MP_COMMISSION_RATE = float(app.config['MP_COMMISSION_RATE'])
+APY_COMMISSION_RATE = float(app.config['APY_COMMISSION_RATE'])
+IIBB_ENABLED = bool(app.config['IIBB_ENABLED'])
+IIBB_RATE = float(app.config['IIBB_RATE'])
+
+# Password reset (si lo usás)
+app.config.setdefault('SECURITY_PASSWORD_SALT', os.environ.get('SECURITY_PASSWORD_SALT', 'pw-reset'))
+app.config.setdefault('PASSWORD_RESET_EXPIRATION', int(os.environ.get('PASSWORD_RESET_EXPIRATION', '3600')))
+app.config.setdefault('ENABLE_SMTP', os.environ.get('ENABLE_SMTP', 'false'))
+app.config.setdefault('MAIL_SERVER', os.environ.get('MAIL_SERVER', 'smtp.gmail.com'))
+app.config.setdefault('MAIL_PORT', int(os.environ.get('MAIL_PORT', '587')))
+app.config.setdefault('MAIL_USERNAME', os.environ.get('MAIL_USERNAME'))
+app.config.setdefault('MAIL_PASSWORD', os.environ.get('MAIL_PASSWORD'))
+app.config.setdefault('MAIL_USE_TLS', True)
+app.config.setdefault('MAIL_DEFAULT_SENDER', os.environ.get('MAIL_DEFAULT_SENDER', 'no-reply@localhost'))
+
+# ----------------- Base de datos -----------------
+# Forzamos SQLite en un path seguro
+DB_PATH = os.path.join(DATA_DIR, "apuntesya.db")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
+
+engine_kwargs = {}
+if DATABASE_URL.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 
-engine = create_engine(DB_URL, **engine_kwargs)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-Session = scoped_session(SessionLocal)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True, **engine_kwargs)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Modelos
-# ──────────────────────────────────────────────────────────────────────────────
-from apuntesya2.models import Base, User, Note, Purchase, University, Faculty, Career
+# Crear tablas al importar (wsgi importa app)
 Base.metadata.create_all(engine)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Login manager
-# ──────────────────────────────────────────────────────────────────────────────
+# Sesión global reutilizable
+Session = scoped_session(sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
+
+# ----------------- Login Manager -----------------
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
@@ -84,129 +122,41 @@ def load_user(user_id):
     with Session() as s:
         return s.get(User, int(user_id))
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Config de Mercado Pago / comisiones
-# ──────────────────────────────────────────────────────────────────────────────
-from apuntesya2 import mp
-
-app.config["MP_ACCESS_TOKEN_PLATFORM"] = os.getenv("MP_ACCESS_TOKEN", "")
-app.config["MP_PUBLIC_KEY"] = os.getenv("MP_PUBLIC_KEY", "")
-app.config["MP_OAUTH_REDIRECT_URL"] = os.getenv("MP_OAUTH_REDIRECT_URL")
-
-# tasas (por si las usás en templates/cálculos)
-MP_COMMISSION_RATE_DEFAULT = 0.0774
-APY_COMMISSION_RATE_DEFAULT = 0.05
-IIBB_ENABLED_DEFAULT = False
-IIBB_RATE_DEFAULT = 0.0
-
-MP_COMMISSION_RATE = float(os.getenv("MP_COMMISSION_RATE", MP_COMMISSION_RATE_DEFAULT))
-APY_COMMISSION_RATE = float(os.getenv("APY_COMMISSION_RATE", APY_COMMISSION_RATE_DEFAULT))
-IIBB_ENABLED = os.getenv("IIBB_ENABLED", str(IIBB_ENABLED_DEFAULT)).lower() in ("1","true","yes")
-IIBB_RATE = float(os.getenv("IIBB_RATE", IIBB_RATE_DEFAULT))
-
-app.config["PLATFORM_FEE_PERCENT"] = float(os.getenv("MP_PLATFORM_FEE_PERCENT", "5.0"))
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Health
-# ──────────────────────────────────────────────────────────────────────────────
-@app.get("/health")
-def health():
-    return {"ok": True}, 200
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Ruta de promoción a admin (SEGURA y opcional por ENV)
-#   Usar solo si:
-#     PROMOTE_ADMIN_ENABLED=1
-#     PROMOTE_ADMIN_SECRET=<secreto_largo_unico>
-#   GET /_promote_admin_once?email=...&secret=...
-# ──────────────────────────────────────────────────────────────────────────────
-@app.route("/_promote_admin_once", methods=["GET"])
-def _promote_admin_once():
-    if os.getenv("PROMOTE_ADMIN_ENABLED", "0") != "1":
-        abort(404)
-
-    secret_env = os.getenv("PROMOTE_ADMIN_SECRET", "")
-    secret_arg = (request.args.get("secret") or "").strip()
-    email = (request.args.get("email") or "").strip().lower()
-
-    if not secret_env or secret_arg != secret_env:
-        abort(403)
-    if not email:
-        return "Falta ?email=", 400
-
-    with Session() as s:
-        user = s.execute(select(User).where(User.email == email)).scalar_one_or_none()
-        if not user:
-            return "Usuario no encontrado", 404
-
-        # setea admin: soporta is_admin o role
-        if hasattr(user, "is_admin"):
-            user.is_admin = True
-        elif hasattr(user, "role"):
-            user.role = "admin"
-        else:
-            return "El modelo User no tiene campo admin/role", 500
-
-        s.commit()
-
-    # Log leve para auditoría
-    app.logger.warning("Promovido a admin: %s", email)
-    return f"OK. {email} ahora es admin."
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────────────
+# ----------------- Utilidades -----------------
 def allowed_pdf(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() == "pdf"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Contact widget (vars)
-# ──────────────────────────────────────────────────────────────────────────────
+def ensure_dirs():
+    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+
+# ----------------- Contact widget config -----------------
 app.config.from_mapping(
     CONTACT_EMAILS=os.getenv("CONTACT_EMAILS", "soporte.apuntesya@gmail.com"),
     CONTACT_WHATSAPP=os.getenv("CONTACT_WHATSAPP", "+543510000000"),
-    SUGGESTIONS_URL=os.getenv(
-        "SUGGESTIONS_URL",
-        "https://docs.google.com/forms/d/e/1FAIpQLScDEukn0sLtjOoWgmvTNaF_qG0iDHue9EOqCYxz_z6bGxzErg/viewform?usp=header"
-    ),
+    SUGGESTIONS_URL=os.getenv("SUGGESTIONS_URL", "https://docs.google.com/forms/d/e/1FAIpQLScDEukn0sLtjOoWgmvTNaF_qG0iDHue9EOqCYxz_z6bGxzErg/viewform?usp=header"),
 )
 
 @app.context_processor
 def inject_contacts():
     emails = [e.strip() for e in str(app.config.get("CONTACT_EMAILS","")).split(",") if e.strip()]
-    return dict(
-        CONTACT_EMAILS=emails,
-        CONTACT_WHATSAPP=app.config.get("CONTACT_WHATSAPP"),
-        SUGGESTIONS_URL=app.config.get("SUGGESTIONS_URL"),
-        MP_COMMISSION_RATE=MP_COMMISSION_RATE,
-        APY_COMMISSION_RATE=APY_COMMISSION_RATE,
-        IIBB_ENABLED=IIBB_ENABLED,
-        IIBB_RATE=IIBB_RATE
-    )
+    return dict(CONTACT_EMAILS=emails, CONTACT_WHATSAPP=app.config.get("CONTACT_WHATSAPP"), SUGGESTIONS_URL=app.config.get("SUGGESTIONS_URL"))
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Rutas principales (catálogo, auth, perfil, upload)
-# ──────────────────────────────────────────────────────────────────────────────
+# ----------------- Rutas -----------------
 @app.route("/")
 def index():
     with Session() as s:
-        notes = (
-            s.execute(
-                select(Note).where(Note.is_active == True)
-                .order_by(Note.created_at.desc())
-                .limit(30)
-            ).scalars().all()
-        )
+        notes = s.execute(
+            select(Note).where(Note.is_active == True).order_by(Note.created_at.desc()).limit(30)
+        ).scalars().all()
     return render_template("index.html", notes=notes)
 
 @app.route("/search")
 def search():
-    q = request.args.get("q", "").strip()
-    university = request.args.get("university", "").strip()
-    faculty = request.args.get("faculty", "").strip()
-    career = request.args.get("career", "").strip()
-    t = request.args.get("type", "")
-
+    q = request.args.get("q","").strip()
+    university = request.args.get("university","").strip()
+    faculty = request.args.get("faculty","").strip()
+    career = request.args.get("career","").strip()
+    t = request.args.get("type","")
     with Session() as s:
         stmt = select(Note).where(Note.is_active == True)
         if q:
@@ -231,47 +181,168 @@ def register():
         faculty = request.form["faculty"].strip()
         career = request.form["career"].strip()
         with Session() as s:
-            exists = s.execute(select(User).where(User.email==email)).scalar_one_or_none()
+            exists = s.execute(select(User).where(User.email == email)).scalar_one_or_none()
             if exists:
                 flash("Ese email ya está registrado.")
                 return redirect(url_for("register"))
             u = User(
-                name=name, email=email,
-                password_hash=generate_password_hash(password),
+                name=name, email=email, password_hash=generate_password_hash(password),
                 university=university, faculty=faculty, career=career
             )
             s.add(u); s.commit()
-            login_user(u); return redirect(url_for("index"))
+            login_user(u)
+            return redirect(url_for("index"))
     return render_template("register.html")
 
 @app.route("/login", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        email = request.form["email"].strip().lower()
-        password = request.form["password"]
+        email = (request.form.get("email") or "").strip().lower()
+        password = request.form.get("password") or ""
         with Session() as s:
-            u = s.execute(select(User).where(User.email==email)).scalar_one_or_none()
+            u = s.execute(select(User).where(User.email == email)).scalar_one_or_none()
             if not u or not check_password_hash(u.password_hash, password):
                 flash("Credenciales inválidas.")
                 return redirect(url_for("login"))
-            login_user(u); return redirect(url_for("index"))
+            login_user(u)
+            return redirect(url_for("index"))
     return render_template("login.html")
 
 @app.route("/logout")
 def logout():
-    logout_user(); return redirect(url_for("index"))
+    logout_user()
+    return redirect(url_for("index"))
 
 @app.route("/profile")
 @login_required
 def profile():
     with Session() as s:
-        my_notes = (
-            s.execute(
-                select(Note).where(Note.seller_id==current_user.id)
-                .order_by(Note.created_at.desc())
-            ).scalars().all()
-        )
+        my_notes = s.execute(
+            select(Note).where(Note.seller_id == current_user.id).order_by(Note.created_at.desc())
+        ).scalars().all()
     return render_template("profile.html", my_notes=my_notes)
+
+@app.route("/profile/balance")
+@login_required
+def profile_balance():
+    fmt = "%Y-%m-%d"
+    today = datetime.utcnow().date()
+    default_start = today.replace(day=1)
+    start_str = request.args.get("start", default_start.strftime(fmt))
+    end_str   = request.args.get("end", today.strftime(fmt))
+    try:
+        start = datetime.strptime(start_str, fmt)
+        end   = datetime.strptime(end_str, fmt) + timedelta(days=1)  # inclusivo
+    except Exception:
+        start, end = datetime(default_start.year, default_start.month, 1), datetime(today.year, today.month, today.day) + timedelta(days=1)
+
+    with Session() as s:
+        base_filter = and_(
+            Note.seller_id == current_user.id,
+            Purchase.status == 'approved',
+            Purchase.created_at >= start,
+            Purchase.created_at < end
+        )
+        totals = s.execute(
+            select(
+                func.count(Purchase.id),
+                func.coalesce(func.sum(Purchase.amount_cents), 0)
+            ).join(Note, Note.id == Purchase.note_id).where(base_filter)
+        ).one()
+        sold_count = int(totals[0] or 0)
+        gross_cents = int(totals[1] or 0)
+
+        mp_commission_cents  = int(round(gross_cents * float(MP_COMMISSION_RATE)))
+        apy_commission_cents = int(round(gross_cents * float(APY_COMMISSION_RATE)))
+        net_cents = gross_cents - mp_commission_cents - apy_commission_cents
+
+        has_views = hasattr(Note, 'views')
+        if has_views:
+            rows = s.execute(
+                select(
+                    Note.id, Note.title, Note.views,
+                    func.count(Purchase.id).label("sold_count"),
+                    func.coalesce(func.sum(Purchase.amount_cents), 0).label("gross_cents")
+                )
+                .join(Purchase, Purchase.note_id == Note.id, isouter=True)
+                .where(Note.seller_id == current_user.id, Purchase.created_at >= start, Purchase.created_at < end)
+                .group_by(Note.id, Note.title, Note.views)
+                .order_by(func.count(Purchase.id).desc())
+            ).all()
+        else:
+            rows = s.execute(
+                select(
+                    Note.id, Note.title,
+                    func.count(Purchase.id).label("sold_count"),
+                    func.coalesce(func.sum(Purchase.amount_cents), 0).label("gross_cents")
+                )
+                .join(Purchase, Purchase.note_id == Note.id, isouter=True)
+                .where(Note.seller_id == current_user.id, Purchase.created_at >= start, Purchase.created_at < end)
+                .group_by(Note.id, Note.title)
+                .order_by(func.count(Purchase.id).desc())
+            ).all()
+
+        per_note = []
+        for r in rows:
+            if has_views:
+                _id, _title, _views, _sold, _gross = r
+                views = int(_views or 0)
+                sold  = int(_sold or 0)
+                gross = int(_gross or 0)
+            else:
+                _id, _title, _sold, _gross = r
+                views = None
+                sold  = int(_sold or 0)
+                gross = int(_gross or 0)
+
+            mp_c  = int(round(gross * float(MP_COMMISSION_RATE)))
+            apy_c = int(round(gross * float(APY_COMMISSION_RATE)))
+            per_note.append({
+                "id": _id,
+                "title": _title,
+                "sold_count": sold,
+                "gross_cents": gross,
+                "mp_commission_cents": mp_c,
+                "apy_commission_cents": apy_c,
+                "net_cents": gross - mp_c - apy_c,
+                "views": views,
+                "conversion": (sold / views * 100.0) if (views and views > 0) else None
+            })
+
+    return render_template(
+        "profile_balance.html",
+        IIBB_ENABLED=IIBB_ENABLED, IIBB_RATE=IIBB_RATE, sold_count=sold_count,
+        total_cents=gross_cents,
+        mp_commission_cents=mp_commission_cents,
+        apy_commission_cents=apy_commission_cents,
+        net_cents=net_cents,
+        per_note=per_note,
+        start=start_str,
+        end=(end - timedelta(days=1)).strftime(fmt),
+        MP_COMMISSION_RATE=MP_COMMISSION_RATE,
+        APY_COMMISSION_RATE=APY_COMMISSION_RATE
+    )
+
+@app.route("/profile/purchases")
+@login_required
+def profile_purchases():
+    with Session() as s:
+        purchases = s.execute(
+            select(Purchase, Note)
+            .join(Note, Note.id == Purchase.note_id)
+            .where(Purchase.buyer_id == current_user.id, Purchase.status == 'approved')
+            .order_by(Purchase.created_at.desc())
+        ).all()
+        items = []
+        for p, n in purchases:
+            items.append(dict(
+                id=p.id,
+                note_id=n.id,
+                title=n.title,
+                price_cents=p.amount_cents,
+                created_at=p.created_at.strftime("%Y-%m-%d %H:%M")
+            ))
+    return render_template("profile_purchases.html", items=items)
 
 @app.route("/upload", methods=["GET","POST"])
 @login_required
@@ -291,14 +362,14 @@ def upload_note():
         if not allowed_pdf(file.filename):
             flash("Sólo PDF.")
             return redirect(url_for("upload_note"))
+        ensure_dirs()
         filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{secure_filename(file.filename)}"
         fpath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         file.save(fpath)
         with Session() as s:
             note = Note(
-                title=title, description=description, university=university,
-                faculty=faculty, career=career, price_cents=price_cents,
-                file_path=filename, seller_id=current_user.id
+                title=title, description=description, university=university, faculty=faculty, career=career,
+                price_cents=price_cents, file_path=filename, seller_id=current_user.id
             )
             s.add(note); s.commit()
         flash("Apunte subido correctamente.")
@@ -309,17 +380,18 @@ def upload_note():
 def note_detail(note_id):
     with Session() as s:
         note = s.get(Note, note_id)
-        if not note or not note.is_active: abort(404)
+        if not note or not note.is_active:
+            abort(404)
         can_download = False
         if current_user.is_authenticated:
-            if note.price_cents==0 or note.seller_id==current_user.id:
+            if note.price_cents == 0 or note.seller_id == current_user.id:
                 can_download = True
             else:
                 p = s.execute(
                     select(Purchase).where(
-                        Purchase.buyer_id==current_user.id,
-                        Purchase.note_id==note.id,
-                        Purchase.status=='approved'
+                        Purchase.buyer_id == current_user.id,
+                        Purchase.note_id == note.id,
+                        Purchase.status == 'approved'
                     )
                 ).scalar_one_or_none()
                 can_download = p is not None
@@ -330,28 +402,26 @@ def note_detail(note_id):
 def download_note(note_id):
     with Session() as s:
         note = s.get(Note, note_id)
-        if not note or not note.is_active: abort(404)
+        if not note or not note.is_active:
+            abort(404)
         allowed = False
-        if note.seller_id==current_user.id or note.price_cents==0:
+        if note.seller_id == current_user.id or note.price_cents == 0:
             allowed = True
         else:
-            p = s.execute(select(Purchase).where(
-                Purchase.buyer_id==current_user.id,
-                Purchase.note_id==note.id,
-                Purchase.status=='approved'
-            )).scalar_one_or_none()
+            p = s.execute(
+                select(Purchase).where(
+                    Purchase.buyer_id == current_user.id,
+                    Purchase.note_id == note.id,
+                    Purchase.status == 'approved'
+                )
+            ).scalar_one_or_none()
             allowed = p is not None
         if not allowed:
             flash("Necesitás comprar este apunte para descargarlo.")
             return redirect(url_for("note_detail", note_id=note.id))
         return send_from_directory(app.config["UPLOAD_FOLDER"], note.file_path, as_attachment=True)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Mercado Pago: OAuth + Compra + Return + Webhook
-# ──────────────────────────────────────────────────────────────────────────────
-def get_valid_seller_token(seller:User) -> str|None:
-    return seller.mp_access_token if seller and seller.mp_access_token else None
-
+# === Mercado Pago OAuth ===
 @app.route("/mp/connect")
 @login_required
 def connect_mp():
@@ -400,12 +470,17 @@ def disconnect_mp():
     flash("Se desvinculó Mercado Pago.")
     return redirect(url_for("profile"))
 
+def get_valid_seller_token(seller: User) -> str | None:
+    return seller.mp_access_token if seller and seller.mp_access_token else None
+
+# === Comprar ===
 @app.route("/buy/<int:note_id>")
 @login_required
 def buy_note(note_id):
     with Session() as s:
         note = s.get(Note, note_id)
-        if not note or not note.is_active: abort(404)
+        if not note or not note.is_active:
+            abort(404)
         if note.seller_id == current_user.id:
             flash("No podés comprar tu propio apunte.")
             return redirect(url_for("note_detail", note_id=note.id))
@@ -414,18 +489,16 @@ def buy_note(note_id):
             return redirect(url_for("download_note", note_id=note.id))
         seller = s.get(User, note.seller_id)
 
-        p = Purchase(buyer_id=current_user.id, note_id=note.id,
-                     status="pending", amount_cents=note.price_cents)
+        p = Purchase(buyer_id=current_user.id, note_id=note.id, status="pending", amount_cents=note.price_cents)
         s.add(p); s.commit()
 
         price_ars = round(note.price_cents/100, 2)
-        platform_fee_percent = (app.config["PLATFORM_FEE_PERCENT"]/100.0)
+        platform_fee_percent = (app.config["PLATFORM_FEE_PERCENT"] / 100.0)
         back_urls = {
             "success": url_for("mp_return", note_id=note.id, _external=True) + f"?external_reference=purchase:{p.id}",
             "failure": url_for("mp_return", note_id=note.id, _external=True) + f"?external_reference=purchase:{p.id}",
             "pending": url_for("mp_return", note_id=note.id, _external=True) + f"?external_reference=purchase:{p.id}",
         }
-
         try:
             seller_token = get_valid_seller_token(seller)
             if seller_token is None:
@@ -438,7 +511,9 @@ def buy_note(note_id):
 
             pref = mp.create_preference_for_seller_token(
                 seller_access_token=use_token,
-                title=note.title, unit_price=price_ars, quantity=1,
+                title=note.title,
+                unit_price=price_ars,
+                quantity=1,
                 marketplace_fee=marketplace_fee,
                 external_reference=f"purchase:{p.id}",
                 back_urls=back_urls,
@@ -455,25 +530,21 @@ def buy_note(note_id):
             flash(f"Error al crear preferencia en Mercado Pago: {e}")
             return redirect(url_for("note_detail", note_id=note.id))
 
-# === Callback de retorno de Mercado Pago ===
 @app.route("/mp/return/<int:note_id>")
 def mp_return(note_id):
-    # MP puede enviar payment_id o collection_id según versión
     payment_id = request.args.get("payment_id") or request.args.get("collection_id") or request.args.get("id")
     ext_ref = request.args.get("external_reference", "")
     pref_id = request.args.get("preference_id", "")
 
     token = app.config["MP_ACCESS_TOKEN_PLATFORM"]
-
     pay = None
-    # 1) Si vino payment_id, obtenerlo directo
+
     if payment_id:
         try:
             pay = mp.get_payment(token, str(payment_id))
         except Exception as e:
             flash(f"No se pudo verificar el pago aún: {e}")
             return redirect(url_for("note_detail", note_id=note_id))
-    # 2) Si no vino, pero tenemos external_reference, buscar por ahí
     elif ext_ref:
         try:
             res = mp.search_payments_by_external_reference(token, ext_ref)
@@ -483,13 +554,11 @@ def mp_return(note_id):
                 payment_id = str(pay.get("id")) if pay else None
         except Exception:
             pass
-    # 3) Fallback: buscar la Purchase más reciente y consultar por su external_reference
+
     if not pay:
         with Session() as s:
             p_last = s.execute(
-                select(Purchase)
-                .where(Purchase.note_id == note_id)
-                .order_by(Purchase.created_at.desc())
+                select(Purchase).where(Purchase.note_id == note_id).order_by(Purchase.created_at.desc())
             ).scalars().first()
             if p_last:
                 try:
@@ -505,7 +574,7 @@ def mp_return(note_id):
     status = (pay or {}).get("status")
     external_reference = (pay or {}).get("external_reference") or ext_ref or ""
     purchase_id = None
-    if external_reference.startswith("purchase:"):
+    if external_reference and external_reference.startswith("purchase:"):
         try:
             purchase_id = int(external_reference.split(":")[1])
         except Exception:
@@ -515,11 +584,8 @@ def mp_return(note_id):
         if purchase_id:
             p = s.get(Purchase, purchase_id)
         else:
-            # Fallback: buyer actual y note_id más reciente
             p = s.execute(
-                select(Purchase)
-                .where(Purchase.note_id == note_id)
-                .order_by(Purchase.created_at.desc())
+                select(Purchase).where(Purchase.note_id == note_id).order_by(Purchase.created_at.desc())
             ).scalars().first()
 
         if p:
@@ -535,26 +601,17 @@ def mp_return(note_id):
     flash("Pago registrado. Si ya figura aprobado, el botón de descarga estará disponible.")
     return redirect(url_for("note_detail", note_id=note_id))
 
-
-# === Webhook de Mercado Pago ===
-@app.route("/mp/webhook", methods=["POST", "GET"])
+@app.route("/mp/webhook", methods=["POST","GET"])
 def mp_webhook():
-    # payment_id puede venir por 'id' (query) o 'data.id' (JSON)
-    payment_id = request.args.get("id")
-    if not payment_id and request.is_json:
-        payment_id = (request.json.get("data", {}) or {}).get("id")
-
+    topic = request.args.get("topic") or request.args.get("type")
+    payment_id = request.args.get("id") or (request.json.get("data",{}).get("id") if request.is_json else None)
     if not payment_id:
         return ("ok", 200)
-
     token = app.config["MP_ACCESS_TOKEN_PLATFORM"]
-
     try:
         pay = mp.get_payment(token, str(payment_id))
     except Exception:
-        # Si no se puede verificar, devolvemos 200 para evitar reintentos agresivos
         return ("ok", 200)
-
     status = pay.get("status")
     external_reference = pay.get("external_reference") or ""
     if external_reference.startswith("purchase:"):
@@ -562,7 +619,6 @@ def mp_webhook():
             pid = int(external_reference.split(":")[1])
         except Exception:
             pid = None
-
         if pid:
             with Session() as s:
                 purchase = s.get(Purchase, pid)
@@ -570,14 +626,173 @@ def mp_webhook():
                     purchase.payment_id = str(payment_id)
                     purchase.status = status
                     s.commit()
-
     return ("ok", 200)
 
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Main (modo local)
-# ──────────────────────────────────────────────────────────────────────────────
+@app.route('/note/<int:note_id>/report', methods=['POST'])
+@login_required
+def report_note(note_id):
+    with Session() as s:
+        n = s.get(Note, note_id)
+        if not n:
+            abort(404)
+        if hasattr(n, "is_reported"):
+            n.is_reported = True
+            s.commit()
+    flash('Gracias por tu reporte. Un administrador lo revisará.')
+    return redirect(url_for('note_detail', note_id=note_id))
+
+# --- Academic taxonomy API (for self-learning dropdowns) ---
+def _norm(s: str) -> str:
+    return (s or "").strip()
+
+@app.get("/api/academics/universities")
+def api_list_universities():
+    with Session() as s:
+        rows = s.execute(select(University).order_by(University.name)).scalars().all()
+        return jsonify([{"id": u.id, "name": u.name} for u in rows])
+
+@app.get("/api/academics/faculties")
+def api_list_faculties():
+    uid = request.args.get("university_id", type=int)
+    with Session() as s:
+        q = select(Faculty)
+        if uid:
+            q = q.where(Faculty.university_id == uid)
+        rows = s.execute(q.order_by(Faculty.name)).scalars().all()
+        return jsonify([{"id": f.id, "name": f.name, "university_id": f.university_id} for f in rows])
+
+@app.get("/api/academics/careers")
+def api_list_careers():
+    fid = request.args.get("faculty_id", type=int)
+    with Session() as s:
+        q = select(Career)
+        if fid:
+            q = q.where(Career.faculty_id == fid)
+        rows = s.execute(q.order_by(Career.name)).scalars().all()
+        return jsonify([{"id": c.id, "name": c.name, "faculty_id": c.faculty_id} for c in rows])
+
+@app.post("/api/academics/universities")
+def api_add_university():
+    data = request.get_json(silent=True) or {}
+    name = _norm(data.get("name"))
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    with Session() as s:
+        u = s.execute(select(University).where(func.lower(University.name) == name.lower())).scalar_one_or_none()
+        if u:
+            return jsonify({"id": u.id, "name": u.name})
+        u = University(name=name)
+        s.add(u); s.commit()
+        return jsonify({"id": u.id, "name": u.name})
+
+@app.post("/api/academics/faculties")
+def api_add_faculty():
+    data = request.get_json(silent=True) or {}
+    name = _norm(data.get("name"))
+    uid = data.get("university_id")
+    if not (name and uid):
+        return jsonify({"error": "name and university_id required"}), 400
+    with Session() as s:
+        f = s.execute(
+            select(Faculty).where(func.lower(Faculty.name) == name.lower(), Faculty.university_id == uid)
+        ).scalar_one_or_none()
+        if f:
+            return jsonify({"id": f.id, "name": f.name, "university_id": f.university_id})
+        f = Faculty(name=name, university_id=uid)
+        s.add(f); s.commit()
+        return jsonify({"id": f.id, "name": f.name, "university_id": f.university_id})
+
+@app.post("/api/academics/careers")
+def api_add_career():
+    data = request.get_json(silent=True) or {}
+    name = _norm(data.get("name"))
+    fid = data.get("faculty_id")
+    if not (name and fid):
+        return jsonify({"error": "name and faculty_id required"}), 400
+    with Session() as s:
+        c = s.execute(
+            select(Career).where(func.lower(Career.name) == name.lower(), Career.faculty_id == fid)
+        ).scalar_one_or_none()
+        if c:
+            return jsonify({"id": c.id, "name": c.name, "faculty_id": c.faculty_id})
+        c = Career(name=name, faculty_id=fid)
+        s.add(c); s.commit()
+        return jsonify({"id": c.id, "name": c.name, "faculty_id": c.faculty_id})
+
+# --- Imagen de perfil (unificada) ---
+@app.route("/profile/upload_image", methods=["POST"])
+@login_required
+def upload_profile_image():
+    file = request.files.get("file")
+    if not file or not file.filename.lower().endswith((".png", ".jpg", ".jpeg")):
+        flash("Formato no permitido. Usá PNG o JPG.")
+        return redirect(url_for("profile"))
+
+    dest_dir = os.path.join(app.static_folder, "uploads", "profile_images")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    ext = ".jpg"
+    lower = file.filename.lower()
+    if lower.endswith(".png"):
+        ext = ".png"
+    filename = f"user_{current_user.id}{ext}"
+    file.save(os.path.join(dest_dir, filename))
+
+    with Session() as s:
+        u = s.get(User, current_user.id)
+        if hasattr(u, "imagen_de_perfil"):
+            u.imagen_de_perfil = filename
+        else:
+            u.profile_image = filename
+        s.commit()
+
+    flash("📸 Foto actualizada con éxito")
+    return redirect(url_for("profile"))
+
+# --- Panel admin (si existe el blueprint) ---
+try:
+    from .admin.routes import admin_bp
+except Exception:
+    try:
+        from admin.routes import admin_bp
+    except Exception:
+        admin_bp = None
+
+if admin_bp:
+    app.register_blueprint(admin_bp)
+
+# ----------------- /_promote_admin_once (segura) -----------------
+from sqlalchemy import select as sa_select
+
+@app.route("/_promote_admin_once", methods=["GET"])
+def _promote_admin_once():
+    # Requiere ENVs: PROMOTE_ADMIN_ENABLED=1 y PROMOTE_ADMIN_SECRET=algo-largo-y-unico
+    if os.getenv("PROMOTE_ADMIN_ENABLED", "0") != "1":
+        abort(404)
+
+    secret_env = os.getenv("PROMOTE_ADMIN_SECRET", "")
+    secret_arg = request.args.get("secret", "")
+    email = (request.args.get("email") or "").strip().lower()
+
+    if not secret_env or secret_arg != secret_env:
+        abort(403)
+    if not email:
+        return "Falta ?email=", 400
+
+    with Session() as session:
+        user = session.execute(sa_select(User).where(User.email == email)).scalar_one_or_none()
+        if not user:
+            return "Usuario no encontrado", 404
+        user.is_admin = True  # ajustá el nombre del campo si difiere
+        session.commit()
+
+    app.logger.warning("Promovido a admin: %s", email)
+    return f"OK. {email} ahora es admin."
+
+# --- main (solo local) ---
 if __name__ == "__main__":
-    print("[DB] Tablas detectadas:", Base.metadata.tables.keys())
-    print("[INFO] App corriendo en modo local 🚀")
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
+    app.run(debug=True)
