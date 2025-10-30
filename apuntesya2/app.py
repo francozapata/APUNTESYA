@@ -31,11 +31,21 @@ app.config["ENV"] = os.getenv("FLASK_ENV", "production")
 # ──────────────────────────────────────────────────────────────────────────────
 # Rutas de archivos persistentes (Render: usar /data)
 # ──────────────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.environ.get("DATA_DIR", "/data")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+
+# Si estás en Render, usá /tmp (es la única carpeta con permisos de escritura)
+if os.environ.get("RENDER", "0") == "1":
+    DATA_DIR = "/tmp/data"
+else:
+    DATA_DIR = os.environ.get("DATA_DIR", os.path.join(PROJECT_ROOT, "data"))
+
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(DATA_DIR, "uploads"))
+
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
 app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB
 
@@ -44,8 +54,10 @@ app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB
 #   - Si DATABASE_URL no está, usamos sqlite:///data/apuntesya.db
 #   - Para SQLite habilitamos check_same_thread=False
 # ──────────────────────────────────────────────────────────────────────────────
-DEFAULT_DB = f"sqlite:///{os.path.join(DATA_DIR, 'apuntesya.db')}"
-DB_URL = os.getenv("DATABASE_URL", DEFAULT_DB)
+DATABASE_URL = f"sqlite:///{os.path.join(DATA_DIR, 'apuntesya.db')}"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
 
 engine_kwargs = {"pool_pre_ping": True, "future": True}
 if DB_URL.startswith("sqlite"):
