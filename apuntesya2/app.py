@@ -37,45 +37,48 @@ import os
 from flask import request, abort
 from sqlalchemy import select
 
+# --- PROMOTE ADMIN (habilitado solo con ENVs) ---
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, select
+
 @app.route("/_promote_admin_once", methods=["GET"])
 def _promote_admin_once():
-    # Para que no exista si no lo habilitás por ENV
+    # Habilitar solo si el ENV lo permite
     if os.getenv("PROMOTE_ADMIN_ENABLED", "0") != "1":
         abort(404)
 
     secret_env = os.getenv("PROMOTE_ADMIN_SECRET", "")
     secret_arg = request.args.get("secret", "")
-    email = request.args.get("email", "").strip().lower()
+    email = (request.args.get("email") or "").strip().lower()
 
     if not secret_env or secret_arg != secret_env:
         abort(403)
-
     if not email:
         return "Falta ?email=", 400
 
-    # Ajustá el import si tus modelos están en otro módulo
+    # Import tardío para evitar ciclos
     from apuntesya2.models import User
-    from apuntesya2.app import db  # si ya tenés 'db' en app.py
 
-    user = db.session.execute(select(User).where(User.email == email)).scalar_one_or_none()
-    if not user:
-        return "Usuario no encontrado", 404
+    # Usar la misma URL de DB que usa tu app (Postgres en Render o SQLite local)
+    db_url = os.getenv("DATABASE_URL") or f"sqlite:///{os.path.join(DATA_DIR,'apuntesya.db')}"
+    engine = create_engine(db_url, future=True)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-    # Marcar admin: adaptá el nombre del campo si es distinto
-    user.is_admin = True
-    db.session.commit()
+    with SessionLocal() as session:
+        user = session.execute(select(User).where(User.email == email)).scalar_one_or_none()
+        if not user:
+            return "Usuario no encontrado", 404
 
-    # Deshabilitá la promo para que sea one-shot (opcional)
-    # os.environ["PROMOTE_ADMIN_ENABLED"] = "0"  # no persiste en Render, por eso ver paso 3
-    app.logger.warning("Ruta /_promote_admin_once habilitada")
+        # ajusta el nombre del campo si en tu modelo es distinto
+        user.is_admin = True
+        session.commit()
 
+    app.logger.warning("Promovido a admin: %s", email)
     return f"OK. {email} ahora es admin."
 
 
-import os
-from flask import Flask
 
-app = Flask(__name__)
+
 
 @app.get("/health")
 def health():
