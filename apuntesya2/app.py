@@ -443,26 +443,52 @@ def buy_note(note_id):
             flash(f"Error al crear preferencia en Mercado Pago: {e}")
             return redirect(url_for("note_detail", note_id=note.id))
 
+# === Callback de retorno de Mercado Pago ===
 @app.route("/mp/return/<int:note_id>")
 def mp_return(note_id):
+    # MP puede enviar payment_id o collection_id según versión
     payment_id = request.args.get("payment_id") or request.args.get("collection_id") or request.args.get("id")
     ext_ref = request.args.get("external_reference", "")
+    pref_id = request.args.get("preference_id", "")
+
     token = app.config["MP_ACCESS_TOKEN_PLATFORM"]
 
     pay = None
+    # 1) Si vino payment_id, obtenerlo directo
     if payment_id:
         try:
             pay = mp.get_payment(token, str(payment_id))
-        except Exception:
-            pass
-    if not pay and ext_ref:
+        except Exception as e:
+            flash(f"No se pudo verificar el pago aún: {e}")
+            return redirect(url_for("note_detail", note_id=note_id))
+    # 2) Si no vino, pero tenemos external_reference, buscar por ahí
+    elif ext_ref:
         try:
             res = mp.search_payments_by_external_reference(token, ext_ref)
             results = (res or {}).get("results") or []
             if results:
                 pay = results[0].get("payment") or results[0]
+                payment_id = str(pay.get("id")) if pay else None
         except Exception:
             pass
+    # 3) Fallback: buscar la Purchase más reciente y consultar por su external_reference
+    if not pay:
+        with Session() as s:
+            p_last = s.execute(
+                select(Purchase)
+                .where(Purchase.note_id == note_id)
+                .order_by(Purchase.created_at.desc())
+            ).scalars().first()
+            if p_last:
+                try:
+                    res = mp.search_payments_by_external_reference(token, f"purchase:{p_last.id}")
+                    results = (res or {}).get("results") or []
+                    if results:
+                        pay = results[0].get("payment") or results[0]
+                        payment_id = str(pay.get("id")) if pay else None
+                        ext_ref = f"purchase:{p_last.id}"
+                except Exception:
+                    pass
 
     status = (pay or {}).get("status")
     external_reference = (pay or {}).get("external_reference") or ext_ref or ""
@@ -476,11 +502,20 @@ def mp_return(note_id):
     with Session() as s:
         if purchase_id:
             p = s.get(Purchase, purchase_id)
-            if p:
-                p.payment_id = str((pay or {}).get("id") or "")
-                if status:
-                    p.status = status
-                s.commit()
+        else:
+            # Fallback: buyer actual y note_id más reciente
+            p = s.execute(
+                select(Purchase)
+                .where(Purchase.note_id == note_id)
+                .order_by(Purchase.created_at.desc())
+            ).scalars().first()
+
+        if p:
+            p.payment_id = str(payment_id) if payment_id else p.payment_id
+            if status:
+                p.status = status
+            s.commit()
+
         if status == "approved":
             flash("¡Pago verificado! Descargando el apunte...")
             return redirect(url_for("download_note", note_id=note_id))
@@ -488,34 +523,44 @@ def mp_return(note_id):
     flash("Pago registrado. Si ya figura aprobado, el botón de descarga estará disponible.")
     return redirect(url_for("note_detail", note_id=note_id))
 
-@app.route("/mp/webhook", methods=["POST","GET"])
+
+# === Webhook de Mercado Pago ===
+@app.route("/mp/webhook", methods=["POST", "GET"])
 def mp_webhook():
-    payment_id = request.args.get("id") or (request.json.get("data",{}).get("id") if request.is_json else None)
+    # payment_id puede venir por 'id' (query) o 'data.id' (JSON)
+    payment_id = request.args.get("id")
+    if not payment_id and request.is_json:
+        payment_id = (request.json.get("data", {}) or {}).get("id")
+
     if not payment_id:
         return ("ok", 200)
+
     token = app.config["MP_ACCESS_TOKEN_PLATFORM"]
+
     try:
         pay = mp.get_payment(token, str(payment_id))
     except Exception:
+        # Si no se puede verificar, devolvemos 200 para evitar reintentos agresivos
         return ("ok", 200)
+
     status = pay.get("status")
-    external_reference = pay.get("external_reference
-
-    # Continuación del webhook
-    if external_reference and external_reference.startswith("purchase:"):
+    external_reference = pay.get("external_reference") or ""
+    if external_reference.startswith("purchase:"):
         try:
-            purchase_id = int(external_reference.split(":")[1])
+            pid = int(external_reference.split(":")[1])
         except Exception:
-            purchase_id = None
+            pid = None
 
-        if purchase_id:
+        if pid:
             with Session() as s:
-                p = s.get(Purchase, purchase_id)
-                if p:
-                    p.payment_id = str(pay.get("id") or "")
-                    p.status = status or "unknown"
+                purchase = s.get(Purchase, pid)
+                if purchase:
+                    purchase.payment_id = str(payment_id)
+                    purchase.status = status
                     s.commit()
+
     return ("ok", 200)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Main (modo local)
