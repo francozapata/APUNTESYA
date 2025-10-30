@@ -227,6 +227,17 @@ def _promote_admin_once():
     app.logger.warning("Promovido a admin: %s", email)
     return f"OK. {email} ahora es admin."
 
+# --- Ensure 'login' endpoint exists (defensive) ---
+try:
+    endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
+    if "login" not in endpoints:
+        # Si por algún motivo no quedó registrada, la registramos explícitamente
+        app.add_url_rule("/login", endpoint="login", view_func=login, methods=["GET", "POST"])
+except Exception as _e:
+    app.logger.warning("No se pudo verificar/forzar endpoint 'login': %s", _e)
+
+
+
 # ---------- Main ----------
 if __name__ == "__main__":
     app.run(debug=True)
