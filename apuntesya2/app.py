@@ -99,7 +99,13 @@ except OperationalError:
     engine = create_engine(DB_URL, pool_pre_ping=True, future=True, connect_args={"check_same_thread": False})
 
 SessionLocal = scoped_session(sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
+from apuntesya2.models import Base, User, Note, Purchase, University, Faculty, Career
+
 Base.metadata.create_all(engine)
+with engine.connect() as conn:
+    tables = conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
+    print("[DB] Tablas detectadas:", tables)
+
 
 # ---------- Otros configs ----------
 app.config["PLATFORM_FEE_PERCENT"] = float(os.getenv("MP_PLATFORM_FEE_PERCENT", "5.0"))
