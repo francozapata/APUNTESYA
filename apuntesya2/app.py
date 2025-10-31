@@ -1,6 +1,10 @@
+<<<<<<< HEAD
 from flask import redirect
 from flask import render_template
 from flask import request, redirect, url_for, flash
+=======
+from flask import render_template
+>>>>>>> fix/help-commissions-endpoint
 import os
 import secrets
 import math
@@ -878,6 +882,7 @@ def upload_profile_image():
 if __name__ == "__main__":
     app.run(debug=True)
 
+<<<<<<< HEAD
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_login import login_required, current_user
 from sqlalchemy import select
@@ -949,3 +954,8 @@ def healthz():
         return {"status":"ok","version": app.config.get("APP_VERSION","unknown")}, 200
     except Exception as e:
         return {"status":"degraded","error": str(e)}, 200
+=======
+@app.route("/help/comisiones")
+def help_commissions():
+    return render_template("help/commissions.html")
+>>>>>>> fix/help-commissions-endpoint
