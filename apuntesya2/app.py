@@ -927,6 +927,7 @@ def change_password():
     flash("¡Contraseña actualizada correctamente!", "success")
     return redirect(url_for("profile"))
 
+<<<<<<< HEAD
 
 @app.route("/help/mercadopago")
 def help_mp():
@@ -941,3 +942,11 @@ def oauth_start():
     except Exception:
         from mp import oauth_authorize_url
     return redirect(oauth_authorize_url())
+=======
+@app.route("/healthz")
+def healthz():
+    try:
+        return {"status":"ok","version": app.config.get("APP_VERSION","unknown")}, 200
+    except Exception as e:
+        return {"status":"degraded","error": str(e)}, 200
+>>>>>>> feat/step1-confirm-healthz
