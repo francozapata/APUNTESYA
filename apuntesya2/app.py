@@ -1,3 +1,4 @@
+from flask import request, redirect, url_for, flash
 import os
 import secrets
 import math
@@ -136,8 +137,13 @@ except Exception:
     except Exception:
         admin_bp = None
 
+from apuntesya2.auth_reset.routes import bp as auth_reset_bp
+
 if admin_bp:
-    app.register_blueprint(admin_bp)
+    
+# Register password reset blueprint
+app.register_blueprint(auth_reset_bp)
+app.register_blueprint(admin_bp)
 
 # -----------------------------------------------------------------------------
 # Utils
@@ -852,3 +858,52 @@ def upload_profile_image():
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
+
+from werkzeug.security import check_password_hash, generate_password_hash
+from flask_login import login_required, current_user
+from sqlalchemy import select
+
+@app.route("/profile/change_password", methods=["POST"])
+@login_required
+def change_password():
+    current_pw = request.form.get("current_password", "")
+    new_pw = request.form.get("new_password", "")
+    confirm_pw = request.form.get("confirm_password", "")
+
+    if len(new_pw) < 8:
+        flash("La nueva contraseña debe tener al menos 8 caracteres.", "danger")
+        return redirect(url_for("profile"))
+
+    if new_pw != confirm_pw:
+        flash("La confirmación no coincide.", "danger")
+        return redirect(url_for("profile"))
+
+    # Try to access DB session and User model
+    try:
+        from apuntesya2.models import User  # common location
+    except Exception:
+        pass
+
+    # Try Session pattern
+    user_obj = None
+    try:
+        # If using SQLAlchemy Core/Session style
+        with Session() as s:
+            user_obj = s.execute(select(User).where(User.id == current_user.id)).scalar_one()
+            user_obj.password_hash = generate_password_hash(new_pw)
+            s.commit()
+    except Exception:
+        # Fallback: Flask-SQLAlchemy style db.session
+        try:
+            user_obj = User.query.get(current_user.id)
+            if user_obj is None:
+                flash("No se encontró el usuario.", "danger")
+                return redirect(url_for("profile"))
+            user_obj.password_hash = generate_password_hash(new_pw)
+            db.session.commit()
+        except Exception as e:
+            flash("Error al actualizar la contraseña: {}".format(e), "danger")
+            return redirect(url_for("profile"))
+
+    flash("¡Contraseña actualizada correctamente!", "success")
+    return redirect(url_for("profile"))

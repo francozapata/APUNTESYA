@@ -16,14 +16,11 @@
   </div>
   <p><strong>{{ current_user.name }}</strong> — <strong> {{ current_user.email }}</strong></p>
   <p>{{ current_user.university }} • {{ current_user.faculty }} • {{ current_user.career }}</p>
-<<<<<<< HEAD
   <!-- antes: url_for('auth_reset.reset_password_request') -->
   <a class="btn secondary" href="#" onclick="alert('Cambio de contraseña disponible próximamente'); return false;">
     Cambiar contraseña
   </a>
-=======
   <!-- reset link removed -->
->>>>>>> db4c5e1 (Fix: quitar link de reset inexistente + ajustes MP via panel)
 </div>
 
 <div class="card">
@@ -56,3 +53,21 @@
   </div>
 </div>
 {% endblock %}
+
+
+<div class="card mt-4">
+  <h3>Cambiar contraseña</h3>
+  <form method="post" action="{{ url_for('change_password') }}">
+    <label>Contraseña actual</label>
+    <input class="input" type="password" name="current_password" required>
+
+    <label>Nueva contraseña (mínimo 8)</label>
+    <input class="input" type="password" name="new_password" minlength="8" required>
+
+    <label>Confirmar nueva contraseña</label>
+    <input class="input" type="password" name="confirm_password" minlength="8" required>
+
+    <button class="btn">Actualizar contraseña</button>
+  </form>
+</div>
+
