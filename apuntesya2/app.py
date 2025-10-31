@@ -129,23 +129,23 @@ def get_valid_seller_token(seller: User) -> str | None:
 # -----------------------------------------------------------------------------
 # Admin blueprint (si existe)
 # -----------------------------------------------------------------------------
+# --- Admin (opcional) ---
 try:
     from .admin.routes import admin_bp
 except Exception:
     try:
         from admin.routes import admin_bp
-from apuntesya2.auth_reset.routes import bp as auth_reset_bp
     except Exception:
         admin_bp = None
 
+# --- Password Reset (SIEMPRE FUERA del try/except de admin) ---
 from apuntesya2.auth_reset.routes import bp as auth_reset_bp
 
-if admin_bp:
-    
-# Register password reset blueprint
-app.register_blueprint(auth_reset_bp)
-app.register_blueprint(admin_bp)
 
+if admin_bp:
+    app.register_blueprint(admin_bp)
+
+app.register_blueprint(auth_reset_bp)
 # -----------------------------------------------------------------------------
 # Utils
 # -----------------------------------------------------------------------------
