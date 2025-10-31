@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<h2 class="mb-3">Mi Balance</h2>
+\1
+
+<div class="card mb-3">
+  <h3>Comisiones y neto estimado</h3>
+  <p class="text-sm">
+    El <strong>neto estimado</strong> incluye la comisión de ApuntesYa (<strong>{{ config.PLATFORM_FEE_PCT or 5 }}%</strong>)
+    y una <strong>estimación</strong> de la comisión de Mercado Pago para <strong>acreditación inmediata</strong> (≈ <strong>{{ '%.2f' % MP_FEE_IMMEDIATE_TOTAL_PCT }}%</strong>).
+    Este valor es orientativo y puede variar según el medio de pago, la configuración de acreditación, tu condición fiscal y la provincia.
+  </p>
+</div>
+
 
 <form method="get" class="row g-2 mb-3">
   <div class="col-md-3">
