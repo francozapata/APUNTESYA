@@ -1,3 +1,5 @@
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from flask import redirect
 from flask import render_template
 from flask import request, redirect, url_for, flash
@@ -77,7 +79,7 @@ engine = create_engine(DB_URL, **engine_kwargs)
 # -----------------------------------------------------------------------------
 # Modelos e inicio de sesión
 # -----------------------------------------------------------------------------
-from apuntesya2.models import (
+from apuntesya2.models import WebhookEvent, (
     Base, User, Note, Purchase, University, Faculty, Career
 )
 
@@ -899,7 +901,7 @@ def change_password():
 
     # Try to access DB session and User model
     try:
-        from apuntesya2.models import User  # common location
+        from apuntesya2.models import WebhookEvent, User  # common location
     except Exception:
         pass
 
@@ -952,3 +954,58 @@ def healthz():
 @app.route("/help/comisiones")
 def help_commissions():
     return render_template("help/commissions.html")
+
+
+@app.route("/webhooks/mercadopago", methods=["POST"])
+def mp_webhook():
+    """Webhook idempotente de Mercado Pago.
+    Usa ?secret= para validar si MP_WEBHOOK_SECRET está configurado.
+    Guarda el evento bruto para depuración y conciliación posterior.
+    """
+    try:
+        configured_secret = app.config.get("MP_WEBHOOK_SECRET")
+        incoming_secret = request.args.get("secret")
+        if configured_secret and configured_secret != incoming_secret:
+            return {"ok": False, "error": "unauthorized"}, 401
+
+        payload = request.get_json(silent=True) or {}
+        topic = payload.get("type") or payload.get("topic")
+        action = payload.get("action") or (payload.get("data", {}) and payload.get("data", {}).get("action"))
+        provider_id = str(
+            payload.get("id") or
+            (payload.get("data") or {}).get("id") or
+            request.headers.get("X-Idempotency-Key") or
+            ""
+        ).strip()
+
+        if not provider_id:
+            # fallback to raw body hash
+            provider_id = "no-id-" + str(abs(hash(request.data)))
+
+        # Idempotencia: si ya lo guardamos, devolvemos 200 sin duplicar
+        with Session(engine) as sx:
+            exists = sx.execute(
+                text("SELECT 1 FROM webhook_events WHERE provider_id = :pid"),
+                {"pid": provider_id}
+            ).first()
+            if exists:
+                return {"ok": True, "duplicate": True}, 200
+
+            evt = WebhookEvent(
+                provider="mercadopago",
+                provider_id=provider_id,
+                topic=topic,
+                action=action,
+                payload=payload
+            )
+            sx.add(evt)
+            sx.commit()
+
+        # TODO (next step): conciliar con ventas y ledger según topic/action
+        return {"ok": True}, 200
+    except Exception as e:
+        try:
+            app.logger.exception("mp_webhook error")
+        except Exception:
+            pass
+        return {"ok": False, "error": str(e)}, 200

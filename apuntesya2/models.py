@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
 from flask_login import UserMixin
 from sqlalchemy.orm import Mapped, mapped_column, relationship, declarative_base
@@ -88,3 +89,15 @@ class Career(Base):
 
 
 
+
+
+class WebhookEvent(Base):
+    __tablename__ = "webhook_events"
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(32), nullable=False, default="mercadopago")
+    provider_id = Column(String(128), nullable=False, unique=True)  # id de evento/pago notificado (idempotencia)
+    topic = Column(String(64), nullable=True)
+    action = Column(String(64), nullable=True)
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
