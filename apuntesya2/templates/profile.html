@@ -16,15 +16,7 @@
   </div>
   <p><strong>{{ current_user.name }}</strong> — <strong> {{ current_user.email }}</strong></p>
   <p>{{ current_user.university }} • {{ current_user.faculty }} • {{ current_user.career }}</p>
-<<<<<<< HEAD
   <a class="btn secondary" href="{{ url_for('auth_reset.reset_password_request') }}">Cambiar contraseña</a>
-=======
-  <!-- antes: url_for('auth_reset.reset_password_request') -->
-  <a class="btn secondary" href="#" onclick="alert('Cambio de contraseña disponible próximamente'); return false;">
-    Cambiar contraseña
-  </a>
-  <!-- reset link removed -->
->>>>>>> fix/help-commissions-endpoint
 </div>
 
 <div class="card">
