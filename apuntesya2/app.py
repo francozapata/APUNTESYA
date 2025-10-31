@@ -26,6 +26,23 @@ load_dotenv()
 # App
 # -----------------------------------------------------------------------------
 app = Flask(__name__, instance_relative_config=True)
+
+# --- MP immediate fee estimate available in templates ---
+try:
+    MP_FEE_IMMEDIATE_TOTAL_PCT = float(app.config.get("MP_FEE_IMMEDIATE_TOTAL_PCT", 7.61))
+except Exception:
+    MP_FEE_IMMEDIATE_TOTAL_PCT = 7.61
+
+@app.context_processor
+def fees_ctx():
+    def mp_fee_estimate(amount, pct=MP_FEE_IMMEDIATE_TOTAL_PCT):
+        try:
+            return round(float(amount) * (float(pct) / 100.0), 2)
+        except Exception:
+            return 0.0
+    return dict(MP_FEE_IMMEDIATE_TOTAL_PCT=MP_FEE_IMMEDIATE_TOTAL_PCT, mp_fee_estimate=mp_fee_estimate)
+
+
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", secrets.token_hex(16))
 app.config["ENV"] = os.getenv("FLASK_ENV", "production")
 
