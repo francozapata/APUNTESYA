@@ -1,3 +1,5 @@
+from flask import redirect
+from flask import render_template
 from flask import request, redirect, url_for, flash
 import os
 import secrets
@@ -907,3 +909,18 @@ def change_password():
 
     flash("¡Contraseña actualizada correctamente!", "success")
     return redirect(url_for("profile"))
+
+
+@app.route("/help/mercadopago")
+def help_mp():
+    return render_template("help/mp_linking.html")
+
+
+@app.route("/connect/mercadopago")
+@login_required
+def oauth_start():
+    try:
+        from .mp import oauth_authorize_url
+    except Exception:
+        from mp import oauth_authorize_url
+    return redirect(oauth_authorize_url())
