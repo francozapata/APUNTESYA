@@ -6,8 +6,13 @@
     <label>Email</label><input class="input" name="email" type="email" required>
     <label>Contraseña</label><input class="input" name="password" type="password" required>
     <button class="btn">Entrar</button>
-  
-<p class="mt-2"><a href="{{ url_for('auth_reset.reset_password_request') }}" class="text-blue-600 hover:underline">¿Olvidaste tu contraseña?</a></p>
-</form>
+
+    <!-- antes: url_for('auth_reset.reset_password_request') -->
+    <p class="mt-2">
+      <a href="#" onclick="alert('Recuperación de contraseña próximamente'); return false;"
+        class="text-blue-600 hover:underline">¿Olvidaste tu contraseña?</a>
+    </p>
+
+  </form>
 </div>
 {% endblock %}
