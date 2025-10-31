@@ -1,3 +1,4 @@
+from flask import render_template
 import os
 import secrets
 import math
@@ -852,3 +853,7 @@ def upload_profile_image():
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
+
+@app.route("/help/comisiones")
+def help_commissions():
+    return render_template("help/commissions.html")
