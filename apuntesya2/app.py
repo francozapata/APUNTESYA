@@ -907,3 +907,10 @@ def change_password():
 
     flash("¡Contraseña actualizada correctamente!", "success")
     return redirect(url_for("profile"))
+
+@app.route("/healthz")
+def healthz():
+    try:
+        return {"status":"ok","version": app.config.get("APP_VERSION","unknown")}, 200
+    except Exception as e:
+        return {"status":"degraded","error": str(e)}, 200
