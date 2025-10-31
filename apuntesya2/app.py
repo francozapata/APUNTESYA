@@ -138,7 +138,6 @@ except Exception:
     except Exception:
         admin_bp = None
 
-# --- Password Reset (SIEMPRE FUERA del try/except de admin) ---
 from apuntesya2.auth_reset.routes import bp as auth_reset_bp
 
 
