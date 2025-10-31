@@ -134,6 +134,7 @@ try:
 except Exception:
     try:
         from admin.routes import admin_bp
+from apuntesya2.auth_reset.routes import bp as auth_reset_bp
     except Exception:
         admin_bp = None
 
