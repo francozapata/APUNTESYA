@@ -1,7 +1,7 @@
-venv/
-__pycache__/
-*.pyc
-*.sqlite3
-instance/
+﻿venv/
 .env
+*.pyc
+__pycache__/
+uploads/
+instance/
 .DS_Store

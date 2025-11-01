@@ -1,3 +1,6 @@
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from apuntesya2.models import WebhookEvent
 from flask import redirect
 from flask import render_template
 from flask import request, redirect, url_for, flash
@@ -77,9 +80,7 @@ engine = create_engine(DB_URL, **engine_kwargs)
 # -----------------------------------------------------------------------------
 # Modelos e inicio de sesión
 # -----------------------------------------------------------------------------
-from apuntesya2.models import (
-    Base, User, Note, Purchase, University, Faculty, Career
-)
+from apuntesya2.models import Base, User, Note, Purchase, University, Faculty, Career
 
 # Crear tablas
 Base.metadata.create_all(engine)
